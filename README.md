@@ -9,6 +9,7 @@ Requirements:
 - N workers
 - N tasks
 - Logger
+- Cleanup queues
 
 ### Dev notes
 

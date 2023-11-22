@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -32,7 +33,7 @@ func main() {
 		}).
 		Queue(func(ctx context.Context) error {
 			fmt.Println("this is my forth task")
-			return nil
+			return errors.New("in my forth task i fail")
 		}).
 		Queue(func(ctx context.Context) error {
 			fmt.Println("this is my fifth task")

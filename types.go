@@ -2,21 +2,23 @@ package poolerchan
 
 import (
 	"context"
-	"golang.org/x/sync/errgroup"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
+	"sync"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
-//go:generate go run github.com/ervitis/foggo@latest afop --struct Pool --no-instance
 type Config struct {
 	numberOfJobs    int
 	numberOfWorkers int
 
+	context context.Context
+
 	logger *log.Logger
-	ctx    context.Context
 }
 
 type Status uint8
@@ -27,6 +29,14 @@ const (
 	Started
 )
 
+const defaultMinQueueLen int = 16
+
+type Result struct {
+	err error
+}
+type TaskQueued struct {
+	t Task
+}
 type Task func(ctx context.Context) error
 
 type Poolchan struct {
@@ -34,8 +44,10 @@ type Poolchan struct {
 	options *Config
 
 	eg       *errgroup.Group
-	jobQueue chan Task
+	jobQueue chan TaskQueued
 	sem      *semaphore.Weighted
+	mtx      sync.Locker
+	err      chan error
 }
 
 type executePool struct {
@@ -43,7 +55,7 @@ type executePool struct {
 }
 
 type ExecuterPool interface {
-	Execute() error
+	Execute(context.Context) error
 }
 
 func defaultConfigPoolchan() *Config {
@@ -51,31 +63,39 @@ func defaultConfigPoolchan() *Config {
 		numberOfJobs:    5,
 		numberOfWorkers: 3,
 		logger:          slog.NewLogLogger(slog.NewJSONHandler(os.Stderr, nil), slog.LevelInfo),
-		ctx:             context.Background(),
+		context:         context.Background(),
 	}
 }
 
-func NewPoolchan(opts ...PoolOption) *Poolchan {
+func NewPoolchan(opts ...ConfigOption) *Poolchan {
 	pool := defaultConfigPoolchan()
 
 	for _, option := range opts {
-		option.apply(pool)
+		option(pool)
 	}
 
-	g, ctx := errgroup.WithContext(pool.ctx)
-	pool.ctx = ctx
+	g, ctx := errgroup.WithContext(pool.context)
+	pool.context = ctx
 
 	return &Poolchan{
 		eg:       g,
 		status:   Stopped,
 		options:  pool,
-		jobQueue: make(chan Task),
+		mtx:      &sync.Mutex{},
+		err:      make(chan error),
+		jobQueue: make(chan TaskQueued, pool.numberOfJobs),
 		sem:      semaphore.NewWeighted(int64(pool.numberOfWorkers)),
 	}
 }
 
 func (p *Poolchan) Queue(task Task) *Poolchan {
-	p.jobQueue <- task
+	if len(p.jobQueue) >= cap(p.jobQueue) {
+		log.Println("job queue full")
+		return p
+	}
+	p.jobQueue <- TaskQueued{
+		t: task,
+	}
 	return p
 }
 
@@ -85,15 +105,55 @@ func (p *Poolchan) Build() ExecuterPool {
 	return &executePool{&d}
 }
 
-func (p *executePool) Execute() error {
-	// acquire semaphore
-	// check status
+func (p *executePool) Execute(ctx context.Context) error {
+	p.mtx.Lock()
+	if p.status != Started {
+		p.mtx.Unlock()
+		return fmt.Errorf("pool not started")
+	}
+	p.status = Started
+	p.mtx.Unlock()
 
-	// check jobs if they are available in jobqueue
-	// get jobs and put them in the jobQueueRunning and execute them in parallel with errgroup
+	wg := &sync.WaitGroup{}
+	for i := 0; i < p.options.numberOfWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			executeWorker(ctx, p.jobQueue, p.err, p.sem)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 
-	// wait them to finish
-	// when one job finish, get jobs from jobqueue and do it again
+	defer func() {
+		close(p.jobQueue)
+		close(p.err)
+	}()
+
+	for err := range p.err {
+		log.Println(err)
+	}
 
 	return nil
+}
+
+func executeWorker(ctx context.Context, taskAcquired <-chan TaskQueued, errCh chan error, sem *semaphore.Weighted) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-taskAcquired:
+			if !ok {
+				return
+			}
+			if err := sem.Acquire(ctx, 1); err != nil {
+				panic(err)
+			}
+			if err := task.t(ctx); err != nil {
+				go func() {
+					errCh <- err
+				}()
+			}
+			sem.Release(1)
+		}
+	}
 }
