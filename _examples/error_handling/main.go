@@ -47,5 +47,6 @@ func main() {
 	if err := queue.Execute(ctx); err != nil {
 		log.Println(err)
 	}
+
 	fmt.Println("end!")
 }

@@ -2,14 +2,12 @@ package poolerchan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"sync"
-
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 type Config struct {
@@ -29,9 +27,12 @@ const (
 	Started
 )
 
-const defaultMinQueueLen int = 16
+const (
+	defaultNumberOfJobs    int = 8
+	defaultNumberOfWorkers int = 4
+)
 
-type Result struct {
+type result struct {
 	err error
 }
 type TaskQueued struct {
@@ -43,11 +44,8 @@ type Poolchan struct {
 	status  Status
 	options *Config
 
-	eg       *errgroup.Group
 	jobQueue chan TaskQueued
-	sem      *semaphore.Weighted
 	mtx      sync.Locker
-	err      chan error
 }
 
 type executePool struct {
@@ -60,8 +58,8 @@ type ExecuterPool interface {
 
 func defaultConfigPoolchan() *Config {
 	return &Config{
-		numberOfJobs:    5,
-		numberOfWorkers: 3,
+		numberOfJobs:    defaultNumberOfJobs,
+		numberOfWorkers: defaultNumberOfWorkers,
 		logger:          slog.NewLogLogger(slog.NewJSONHandler(os.Stderr, nil), slog.LevelInfo),
 		context:         context.Background(),
 	}
@@ -74,23 +72,17 @@ func NewPoolchan(opts ...ConfigOption) *Poolchan {
 		option(pool)
 	}
 
-	g, ctx := errgroup.WithContext(pool.context)
-	pool.context = ctx
-
 	return &Poolchan{
-		eg:       g,
 		status:   Stopped,
 		options:  pool,
 		mtx:      &sync.Mutex{},
-		err:      make(chan error),
 		jobQueue: make(chan TaskQueued, pool.numberOfJobs),
-		sem:      semaphore.NewWeighted(int64(pool.numberOfWorkers)),
 	}
 }
 
 func (p *Poolchan) Queue(task Task) *Poolchan {
 	if len(p.jobQueue) >= cap(p.jobQueue) {
-		log.Println("job queue full")
+		p.options.logger.Println("job queue full")
 		return p
 	}
 	p.jobQueue <- TaskQueued{
@@ -111,49 +103,31 @@ func (p *executePool) Execute(ctx context.Context) error {
 		p.mtx.Unlock()
 		return fmt.Errorf("pool not started")
 	}
-	p.status = Started
+	p.status = Running
 	p.mtx.Unlock()
 
-	wg := &sync.WaitGroup{}
+	results := make(chan result, p.options.numberOfJobs)
+
 	for i := 0; i < p.options.numberOfWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			executeWorker(ctx, p.jobQueue, p.err, p.sem)
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-
-	defer func() {
-		close(p.jobQueue)
-		close(p.err)
-	}()
-
-	for err := range p.err {
-		log.Println(err)
+		go p.executeWorker(ctx, results)
 	}
 
-	return nil
+	close(p.jobQueue)
+	defer close(results)
+
+	var allErrors error
+	for i := 0; i < p.options.numberOfJobs; i++ {
+		res := <-results
+		if res.err != nil {
+			allErrors = errors.Join(allErrors, res.err)
+		}
+	}
+
+	return allErrors
 }
 
-func executeWorker(ctx context.Context, taskAcquired <-chan TaskQueued, errCh chan error, sem *semaphore.Weighted) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case task, ok := <-taskAcquired:
-			if !ok {
-				return
-			}
-			if err := sem.Acquire(ctx, 1); err != nil {
-				panic(err)
-			}
-			if err := task.t(ctx); err != nil {
-				go func() {
-					errCh <- err
-				}()
-			}
-			sem.Release(1)
-		}
+func (p *executePool) executeWorker(ctx context.Context, res chan<- result) {
+	for job := range p.jobQueue {
+		res <- result{err: job.t(ctx)}
 	}
 }

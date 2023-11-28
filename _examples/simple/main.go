@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 func main() {
-	const sec = 15
+	const sec = 10
 	ctx, cancel := context.WithTimeout(context.Background(), sec*time.Second)
 	defer func() {
 		cancel()
@@ -19,7 +20,7 @@ func main() {
 
 	queue := myQueueBuilder.
 		Queue(func(ctx context.Context) error {
-			fmt.Println("hello world")
+			fmt.Println("this is my first task")
 			return nil
 		}).
 		Queue(func(ctx context.Context) error {
@@ -32,7 +33,7 @@ func main() {
 		}).
 		Queue(func(ctx context.Context) error {
 			fmt.Println("this is my forth task")
-			return nil
+			return errors.New("ups!")
 		}).
 		Queue(func(ctx context.Context) error {
 			fmt.Println("this is my fifth task")
