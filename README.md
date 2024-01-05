@@ -1,15 +1,19 @@
 # PoolerChan
 
-Pooling library for golang
+Simple worker pool library for golang
 
-Requirements:
+### Tasks done
 
-- Handle errors
-  - Ignore some kind of errors
 - N workers
 - N tasks
 - Logger
 - Cleanup queues
+
+### Pending tasks
+
+- Handle errors
+  - Ignore some kind of errors
+- Check context
 
 ### Dev notes
 
