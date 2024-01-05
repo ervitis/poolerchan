@@ -3,21 +3,10 @@ package poolerchan
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log"
-	"log/slog"
-	"os"
 	"sync"
 )
 
-type Config struct {
-	numberOfJobs    int
-	numberOfWorkers int
-
-	context context.Context
-
-	logger *log.Logger
-}
+var ErrPoolNotStarted = errors.New("poolerchan not started")
 
 type Status uint8
 
@@ -48,21 +37,12 @@ type Poolchan struct {
 	mtx      sync.Locker
 }
 
-type executePool struct {
+type execute struct {
 	*Poolchan
 }
 
-type ExecuterPool interface {
+type Executer interface {
 	Execute(context.Context) error
-}
-
-func defaultConfigPoolchan() *Config {
-	return &Config{
-		numberOfJobs:    defaultNumberOfJobs,
-		numberOfWorkers: defaultNumberOfWorkers,
-		logger:          slog.NewLogLogger(slog.NewJSONHandler(os.Stderr, nil), slog.LevelInfo),
-		context:         context.Background(),
-	}
 }
 
 func NewPoolchan(opts ...ConfigOption) *Poolchan {
@@ -82,7 +62,7 @@ func NewPoolchan(opts ...ConfigOption) *Poolchan {
 
 func (p *Poolchan) Queue(task Task) *Poolchan {
 	if len(p.jobQueue) >= cap(p.jobQueue) {
-		p.options.logger.Println("job queue full")
+		p.options.logger.Warn("job queue full")
 		return p
 	}
 	p.jobQueue <- TaskQueued{
@@ -91,17 +71,17 @@ func (p *Poolchan) Queue(task Task) *Poolchan {
 	return p
 }
 
-func (p *Poolchan) Build() ExecuterPool {
+func (p *Poolchan) Build() Executer {
 	d := *p
 	d.status = Started
-	return &executePool{&d}
+	return &execute{&d}
 }
 
-func (p *executePool) Execute(ctx context.Context) error {
+func (p *execute) Execute(ctx context.Context) error {
 	p.mtx.Lock()
 	if p.status != Started {
 		p.mtx.Unlock()
-		return fmt.Errorf("pool not started")
+		return ErrPoolNotStarted
 	}
 	p.status = Running
 	p.mtx.Unlock()
@@ -126,7 +106,7 @@ func (p *executePool) Execute(ctx context.Context) error {
 	return allErrors
 }
 
-func (p *executePool) executeWorker(ctx context.Context, res chan<- result) {
+func (p *execute) executeWorker(ctx context.Context, res chan<- result) {
 	for job := range p.jobQueue {
 		res <- result{err: job.t(ctx)}
 	}
