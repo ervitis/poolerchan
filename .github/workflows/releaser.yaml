@@ -1,0 +1,72 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_version_message:
+        description: 'Enter a description'
+        required: true
+        type: string
+      release_type:
+        description: 'Select the release type'
+        type: choice
+        required: true
+        default: 'patch'
+        options:
+          - major
+          - minor
+          - patch
+
+jobs:
+
+  create-tag:
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      latest_tag: ${{steps.set-tag.outputs.LATEST_TAG}}
+      new_version: ${{steps.create-version.outputs.NEW_VERSION}}
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Get latest tag
+        id: set-tag
+        run: |
+          git fetch --tags
+          latest_tag=$(git tag --sort=-creatordate | head -n 1)
+          echo "my: "${latest_tag}
+          echo "LATEST_TAG=${latest_tag}" >> $GITHUB_OUTPUT
+          echo "my2: "${{ env.LATEST_TAG }}
+
+      - name: Determine New Version
+        id: create-version
+        run: |
+          case ${{ github.event.inputs.release_type }} in
+          major)
+           version=$(echo "${{ steps.set-tag.outputs.latest_tag }}" | awk -F. '{printf "v%d.%d.%d\n", $1+1, 0, 0}')
+           ;;
+          minor)
+           version=$(echo "${{ steps.set-tag.outputs.latest_tag }}" | awk -F. '{printf "v%d.%d.%d\n", $1, $2+1, 0}')
+           ;;
+          patch)
+           version=$(echo "${{ steps.set-tag.outputs.latest_tag }}" | awk -F. '{printf "v%d.%d.%d\n", $1, $2, $3+1}')
+           ;;
+          *)
+           echo "Invalid release type specified."
+           exit 1
+           ;;
+          esac
+          echo "NEW_VERSION=${version}" >> $GITHUB_OUTPUT
+
+      - name: Create Tag
+        run: |
+          git config user.email "${{ secrets.BOT_EMAIL }}"
+          git config user.name "${{ secrets.BOT_NAME }}"
+          git tag -a "${{ steps.create-version.outputs.new_version }}" -m "${{ github.event.inputs.tag_version_message }}"
+          git push origin "${{ steps.create-version.outputs.new_version }}"
