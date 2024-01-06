@@ -16,7 +16,7 @@ func main() {
 	defer func() {
 		cancel()
 	}()
-	myQueueBuilder := poolerchan.NewPoolchan(poolerchan.WithContext(ctx))
+	myQueueBuilder := poolerchan.NewPoolchan()
 
 	queue := myQueueBuilder.
 		Queue(func(ctx context.Context) error {
