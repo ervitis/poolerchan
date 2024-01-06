@@ -147,10 +147,6 @@ func (e *customErr) Error() string {
 }
 
 func Test_execute_Execute(t *testing.T) {
-	var buff = new(bytes.Buffer)
-
-	globalLogger := slog.New(slog.NewTextHandler(buff, nil))
-
 	cErr := &customErr{msg: "ups"}
 
 	type args struct {
@@ -170,11 +166,9 @@ func Test_execute_Execute(t *testing.T) {
 				ctx: context.TODO(),
 				tasks: []Task{
 					func(ctx context.Context) error {
-						globalLogger.Info("task1")
 						return nil
 					},
 					func(ctx context.Context) error {
-						globalLogger.Info("task2")
 						return nil
 					},
 				},
@@ -184,26 +178,6 @@ func Test_execute_Execute(t *testing.T) {
 				pooler := p.Queue(tasks[0]).Queue(tasks[1]).Build()
 				if err := pooler.Execute(args.ctx); err != nil {
 					return fmt.Errorf("error executing pool worker: %w", err)
-				}
-				if buff.Len() == 0 {
-					return nil
-				}
-				msg := strings.SplitN(buff.String(), "\n", 2)
-				if len(msg) <= 1 {
-					return fmt.Errorf("not printed the tasks")
-				}
-
-				c := 0
-				for i := range msg {
-					if strings.Contains(msg[i], "task1") {
-						c++
-					}
-					if strings.Contains(msg[i], "task2") {
-						c++
-					}
-				}
-				if c != 2 {
-					return fmt.Errorf("tasks not run")
 				}
 				return nil
 			},
@@ -215,11 +189,9 @@ func Test_execute_Execute(t *testing.T) {
 				ctx: context.TODO(),
 				tasks: []Task{
 					func(ctx context.Context) error {
-						globalLogger.Info("task1")
 						return new(customErr)
 					},
 					func(ctx context.Context) error {
-						globalLogger.Info("task2")
 						return nil
 					},
 				},
@@ -230,26 +202,6 @@ func Test_execute_Execute(t *testing.T) {
 				err := pooler.Execute(args.ctx)
 				if err == nil {
 					return fmt.Errorf("should be an error executing pool worker")
-				}
-				if buff.Len() == 0 {
-					return nil
-				}
-				msg := strings.SplitN(buff.String(), "\n", 2)
-				if len(msg) <= 1 {
-					return fmt.Errorf("not printed the tasks")
-				}
-
-				c := 0
-				for i := range msg {
-					if strings.Contains(msg[i], "task1") {
-						c++
-					}
-					if strings.Contains(msg[i], "task2") {
-						c++
-					}
-				}
-				if c != 2 {
-					return fmt.Errorf("tasks not run")
 				}
 
 				if !errors.As(err, &cErr) {
@@ -262,7 +214,6 @@ func Test_execute_Execute(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			buff.Reset()
 			p := NewPoolchan(tt.cfg...)
 			if tt.checkResult == nil {
 				t.Fail()

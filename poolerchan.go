@@ -3,6 +3,7 @@ package poolerchan
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -72,6 +73,10 @@ func (p *Poolchan) Queue(task Task) *Poolchan {
 }
 
 func (p *Poolchan) Build() Executer {
+	if p.options.numberOfWorkers > len(p.jobQueue) {
+		p.options.logger.Warn("number of workers are more than number of tasks")
+		p.options.numberOfWorkers = (len(p.jobQueue) % 2) + 1
+	}
 	d := *p
 	d.status = Started
 	return &execute{&d}
@@ -87,16 +92,21 @@ func (p *execute) Execute(ctx context.Context) error {
 	p.mtx.Unlock()
 
 	results := make(chan result, p.options.numberOfJobs)
+	wg := &sync.WaitGroup{}
 
 	for i := 0; i < p.options.numberOfWorkers; i++ {
-		go p.executeWorker(ctx, results)
+		wg.Add(1)
+		go p.executeWorker(ctx, results, wg)
 	}
 
 	close(p.jobQueue)
-	defer close(results)
 
 	var allErrors error
-	for i := 0; i < p.options.numberOfJobs; i++ {
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	for i := 0; i < p.options.numberOfWorkers; i++ {
 		res := <-results
 		if res.err != nil {
 			allErrors = errors.Join(allErrors, res.err)
@@ -106,8 +116,27 @@ func (p *execute) Execute(ctx context.Context) error {
 	return allErrors
 }
 
-func (p *execute) executeWorker(ctx context.Context, res chan<- result) {
+func (p *execute) executeWorker(ctx context.Context, res chan<- result, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for job := range p.jobQueue {
-		res <- result{err: job.t(ctx)}
+		p.options.logger.Debug("executing task")
+		select {
+		case <-ctx.Done():
+			err := context.Cause(ctx)
+			if errors.Is(err, context.Canceled) {
+				// canceled
+				fmt.Println("canceled")
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				// deadline
+				fmt.Println("deadline")
+			} else {
+				// another
+				fmt.Println(err)
+			}
+			res <- result{err: err}
+		default:
+			res <- result{err: job.t(ctx)}
+		}
+
 	}
 }
