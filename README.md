@@ -62,7 +62,7 @@ This project is licensed under the [Apache 2.0](LICENSE)
 ### Pending tasks
 
 - Handle errors
-  - Ignore some kind of errors
+  - Ignore some kind of errors -> Nope possible
 
 ### Dev notes
 

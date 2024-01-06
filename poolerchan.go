@@ -19,7 +19,7 @@ const (
 
 const (
 	defaultNumberOfJobs    int = 8
-	defaultNumberOfWorkers int = 4
+	defaultNumberOfWorkers int = 1
 )
 
 type result struct {
@@ -112,6 +112,7 @@ func (p *execute) Execute(ctx context.Context) error {
 			allErrors = errors.Join(allErrors, res.err)
 		}
 	}
+	p.status = Stopped
 
 	return allErrors
 }
