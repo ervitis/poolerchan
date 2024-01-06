@@ -57,12 +57,12 @@ This project is licensed under the [Apache 2.0](LICENSE)
 - N tasks
 - Logger
 - Cleanup queues
+- Check context
 
 ### Pending tasks
 
 - Handle errors
   - Ignore some kind of errors
-- Check context
 
 ### Dev notes
 
