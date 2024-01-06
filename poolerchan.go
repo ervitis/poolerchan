@@ -3,7 +3,7 @@ package poolerchan
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -124,14 +124,11 @@ func (p *execute) executeWorker(ctx context.Context, res chan<- result, wg *sync
 		case <-ctx.Done():
 			err := context.Cause(ctx)
 			if errors.Is(err, context.Canceled) {
-				// canceled
-				fmt.Println("canceled")
+				p.options.logger.Warn("context canceled")
 			} else if errors.Is(err, context.DeadlineExceeded) {
-				// deadline
-				fmt.Println("deadline")
+				p.options.logger.Warn("deadline context exceeded")
 			} else {
-				// another
-				fmt.Println(err)
+				p.options.logger.Warn("error executing task", slog.Any("error", err))
 			}
 			res <- result{err: err}
 		default:
